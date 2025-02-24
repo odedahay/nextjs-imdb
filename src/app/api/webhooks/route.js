@@ -1,5 +1,8 @@
-import { Webhook } from 'svix'
-import { headers } from 'next/headers'
+import { Webhook } from 'svix';
+import { headers } from 'next/headers';
+import { createOrUpdateUser, deleteUser } from '@/lib/actions /user';
+import { clerkClient } from '@clerk/nextjs/server';
+
 
 export async function POST(req) {
     const SIGNING_SECRET = process.env.SIGNING_SECRET
@@ -46,21 +49,41 @@ export async function POST(req) {
 
     // Do something with payload
     // For this guide, log payload to console
-    const { id } = evt.data
-    const eventType = evt.type
-    console.log(`Received webhook with ID ${id} and event type of ${eventType}`)
-    console.log('Webhook payload:', body)
+    const { id } = evt?.data
+    const eventType = evt?.type
+    // console.log(`Received webhook with ID ${id} and event type of ${eventType}`)
+    // console.log('Webhook payload:', body)
 
-    if (eventType === 'user.created') {
-        console.log('User created event')
-    }
-
-    if (eventType === 'user.updated') {
-        console.log('User updated event')
+    if (eventType === 'user.created' || eventType === 'user.updated') {
+        const { first_name, last_name, email_addresses, image_url } = evt?.data
+        try {
+            const user = await createOrUpdateUser(id, image_url, email_addresses, first_name, last_name);
+            if (user && eventType === 'user.created') {
+                try {
+                    const client = await clerkClient();
+                    await client.users.updateUserMetadata(id, {
+                        publicMetadata: {
+                            userMongoId: user._id,
+                        },
+                    });
+                } catch (error) {
+                    console.error('Error: Could not create or update user', error);
+                }
+            }
+        } catch (error) {
+            console.error('Error: Could not create or update user', error);
+        }
     }
 
     if (eventType === 'user.deleted') {
-        console.log('User deleted event')
+        try {
+            await deleteUser(id);
+        } catch (error) {
+            console.log('Error: Could not delete user', error);
+            return new Response('Error: Could not delete user', {
+                status: 400,
+            });
+        }
     }
 
     return new Response('Webhook received', { status: 200 })
